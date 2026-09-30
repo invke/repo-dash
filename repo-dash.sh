@@ -6,7 +6,15 @@ set -uo pipefail
 # Column widths count characters, which needs a UTF-8 locale.
 case "${LC_ALL:-${LC_CTYPE:-${LANG:-}}}" in *[Uu][Tt][Ff]-8*|*utf8*) ;; *) export LC_ALL=en_US.UTF-8 ;; esac
 
+# Personal settings (REPOS, RD_ORG, RD_BASES) live outside the script.
+RD_CONFIG="${RD_CONFIG:-$HOME/.config/repo-dash/config}"
+# shellcheck source=/dev/null
+[ -f "$RD_CONFIG" ] && . "$RD_CONFIG"
 REPOS="${REPOS:-$HOME/Repositories}"
+RD_ORG="${RD_ORG:-}"                                        # empty: PRs from every org
+RD_BASES="${RD_BASES:-internal staging develop main master}"  # first one on origin is the target
+ORG_Q="${RD_ORG:+org:$RD_ORG }"
+export REPOS RD_ORG RD_BASES ORG_Q
 
 # VS Code workspace files are JSONC — strip trailing commas before jq sees them
 jsonc() { perl -0pe 's/,(\s*[}\]])/\1/g' "$1"; }
@@ -288,7 +296,7 @@ build_prs() {
   PR_TSV="$cache/prs-v2.tsv"; export PR_TSV
   if [ -s "$PR_TSV" ] && [ -z "$(find "$PR_TSV" -mmin +5 2>/dev/null)" ]; then return 0; fi
   gh api graphql -f query='
-    { search(query: "org:paperkite is:pr is:open author:@me", type: ISSUE, first: 100) {
+    { search(query: "'"$ORG_Q"'is:pr is:open author:@me", type: ISSUE, first: 100) {
         nodes { ... on PullRequest {
           number headRefName baseRefName title isDraft reviewDecision repository { name }
           commits(last: 1) { nodes { commit { statusCheckRollup { state } } } } } } } }' \
@@ -521,7 +529,7 @@ preview_target() {
 
 preview_base() {   # the integration branch this repo merges into
   local b
-  for b in internal staging develop main master; do
+  for b in $RD_BASES; do
     git -C "$1" rev-parse --verify --quiet "origin/$b" >/dev/null && { printf 'origin/%s' "$b"; return; }
   done
 }
@@ -727,9 +735,9 @@ build_reviews() {   # open PRs waiting on my review, mine approved and ready to 
       latestReviews(first: 10) { nodes { state author { login } } }
       reviewRequests(first: 5) { nodes { requestedReviewer { ... on User { login } ... on Team { name } } } }
       commits(last: 1) { nodes { commit { statusCheckRollup { state } } } } }
-    { toMe: search(query: "org:paperkite is:pr is:open review-requested:@me", type: ISSUE, first: 50) { nodes { ...pr } }
-      fromMe: search(query: "org:paperkite is:pr is:open author:@me -is:draft -review:approved", type: ISSUE, first: 50) { nodes { ...pr } }
-      ready: search(query: "org:paperkite is:pr is:open author:@me -is:draft review:approved", type: ISSUE, first: 50) { nodes { ...pr } } }' \
+    { toMe: search(query: "'"$ORG_Q"'is:pr is:open review-requested:@me", type: ISSUE, first: 50) { nodes { ...pr } }
+      fromMe: search(query: "'"$ORG_Q"'is:pr is:open author:@me -is:draft -review:approved", type: ISSUE, first: 50) { nodes { ...pr } }
+      ready: search(query: "'"$ORG_Q"'is:pr is:open author:@me -is:draft review:approved", type: ISSUE, first: 50) { nodes { ...pr } } }' \
     --jq '
       # "-" stands in for empty: bash read collapses consecutive tabs
       def orDash: if . == null or . == "" then "-" else . end;

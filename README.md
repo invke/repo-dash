@@ -32,7 +32,7 @@ RD_BASES="internal staging develop main master"   # first one on origin is the P
 
 ## Use
 
-Tabs: `1 repos` · `2 reviews` (waiting on you / ready to merge / waiting on others, with how far each trails its target) · `3 workspaces` · `4 parked`.
+Tabs: `1 repos` · `2 PRs` · `3 workspaces` · `4 parked`. The PRs tab lists every open PR of yours, grouped by what stands between it and merged — ready to merge, approved but not mergeable yet, changes requested, in review, drafts, stale (90+ days) — plus the ones waiting on your review, each with its merge state and how far it trails its target.
 
 | key | | key | |
 |---|---|---|---|

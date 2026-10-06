@@ -74,10 +74,13 @@ while (( $# )); do
                 exit 0 ;;
     --tabs)     shift   # the tab strip: numbered (the number jumps there) and counted
                 cur=$(cat "${1:-}" 2>/dev/null); cur=${cur:-repos}
-                rv="$HOME/.cache/repo-dash/reviews-v2.tsv"
-                n_in=$(awk -F'\t' '$1=="in"' "$rv" 2>/dev/null | wc -l | tr -d ' ')
-                n_out=$(awk -F'\t' '$1=="out"' "$rv" 2>/dev/null | wc -l | tr -d ' ')
-                n_ready=$(awk -F'\t' '$1=="ready"' "$rv" 2>/dev/null | wc -l | tr -d ' ')
+                rv="$HOME/.cache/repo-dash/pr-list-v1.tsv"
+                kinds=$(cut -f1 "$rv" 2>/dev/null)
+                n_in=$(printf '%s\n' "$kinds" | grep -cx in)
+                n_ready=$(printf '%s\n' "$kinds" | grep -cx ready)
+                n_out=$(printf '%s\n' "$kinds" | grep -cxE 'review|stuck|changes')
+                n_chg=$(printf '%s\n' "$kinds" | grep -cx changes)
+                n_draft=$(printf '%s\n' "$kinds" | grep -cx draft)
                 n_repos=$(cat "$HOME/.cache/repo-dash/count-repos" 2>/dev/null)
                 n_ws=$(ls "$REPOS"/_*.code-workspace 2>/dev/null | wc -l | tr -d ' ')
                 n_parked=$(awk 'END{print NR}' "$PARKED_FILE" 2>/dev/null)
@@ -85,13 +88,15 @@ while (( $# )); do
                 badge() { local n=${3:-0}; if [ "$n" -gt 0 ] 2>/dev/null; then printf '\033[1;%sm%s%s\033[0m' "$1" "$2" "$n"; else printf '\033[%sm%s0\033[0m' "$1" "$2"; fi; }
                 # One line that fzf draws into its top border: the active tab is a pill cut into the frame.
                 out=""; i=0
-                for t in repos reviews workspaces parked; do
+                for t in repos prs workspaces parked; do
                   i=$((i + 1))
                   case "$t" in
-                    reviews)    plain="$i reviews ⚑${n_in:-0} ✓${n_ready:-0} ◷${n_out:-0}"
+                    prs)        plain="$i PRs ⚑${n_in:-0} ✓${n_ready:-0} ◷${n_out:-0} ✎${n_draft:-0}"
+                                [ "${n_chg:-0}" -gt 0 ] && plain="$plain ✗$n_chg"
                                 # someone waiting on you is the one number that shouts
                                 if [ "${n_in:-0}" -gt 0 ]; then counts=$'\033[1;30;43m'"⚑$n_in$z"; else counts="$(badge 33 ⚑ 0)"; fi
-                                counts="$counts $(badge 32 ✓ "$n_ready") $(badge 34 ◷ "$n_out")" ;;
+                                counts="$counts $(badge 32 ✓ "$n_ready") $(badge 34 ◷ "$n_out") $(badge 90 ✎ "$n_draft")"
+                                [ "${n_chg:-0}" -gt 0 ] && counts="$counts $(badge 31 ✗ "$n_chg")" ;;
                     repos)      plain="$i repos ⎇${n_repos:-0}";      counts=$(badge 36 ⎇ "$n_repos") ;;
                     workspaces) plain="$i workspaces ▦${n_ws:-0}";    counts=$(badge 33 ▦ "$n_ws") ;;
                     parked)     plain="$i parked ‖${n_parked:-0}";    counts=$(badge 35 ‖ "$n_parked") ;;
@@ -106,9 +111,9 @@ while (( $# )); do
     --toggle-tab) shift; view=$1; dir=${2:-1}
                 cur=$(cat "$view" 2>/dev/null)
                 if [ "$dir" = 1 ]; then
-                  case "$cur" in reviews) next=workspaces ;; workspaces) next=parked ;; parked) next=repos ;; *) next=reviews ;; esac
+                  case "$cur" in prs) next=workspaces ;; workspaces) next=parked ;; parked) next=repos ;; *) next=prs ;; esac
                 else
-                  case "$cur" in reviews) next=repos ;; workspaces) next=reviews ;; parked) next=workspaces ;; *) next=parked ;; esac
+                  case "$cur" in prs) next=repos ;; workspaces) next=prs ;; parked) next=workspaces ;; *) next=parked ;; esac
                 fi
                 echo "$next" > "$view"
                 exit 0 ;;
@@ -148,7 +153,7 @@ while (( $# )); do
                   --jq '"\u001b[1;95m#\(.number)\u001b[0m \u001b[1;97m\(.title)\u001b[0m\n  \(.headRefName) → \(.baseRefName)  \u001b[2m\(.reviewDecision // "") · \(.mergeStateStatus)\u001b[0m"'
                 printf '\nmerge with a merge commit? [y/N] '; read -rsn1 yn; printf '%s\n' "$yn"
                 if [ "$yn" = y ] || [ "$yn" = Y ]; then
-                  gh pr merge "$url" --merge && rm -f "$HOME/.cache/repo-dash/reviews-v2.tsv" "$HOME/.cache/repo-dash/prs-v2.tsv"
+                  gh pr merge "$url" --merge && rm -f "$HOME/.cache/repo-dash/pr-list-v1.tsv" "$HOME/.cache/repo-dash/prs-v2.tsv"
                   read -rsn1 -p $'\033[2many key\033[0m'
                 fi
                 exit 0 ;;
@@ -655,7 +660,7 @@ pick() {   # live dashboard inside fzf: searchable, self-refreshing, openable
     --bind "r:reload-sync($rowcmd)" \
     --bind "tab:$nexttab,right:$nexttab" \
     --bind "shift-tab:$prevtab,left:$prevtab" \
-    --bind "1:$(jumptab repos),2:$(jumptab reviews),3:$(jumptab workspaces),4:$(jumptab parked)" \
+    --bind "1:$(jumptab repos),2:$(jumptab prs),3:$(jumptab workspaces),4:$(jumptab parked)" \
     --bind "m:execute('$self' --merge {2})+reload-sync($rowcmd)" \
     --bind "z:execute-silent('$self' --toggle-park {2})+exclude+execute-silent('$self' --bg-refresh '$portfile' force)" \
     --bind "p:execute-silent('$self' --open-pr {2})" \
@@ -724,34 +729,42 @@ render() {   # plain, non-interactive: same rows with the path column stripped
   rm -f "$sf"
 }
 
-build_reviews() {   # open PRs waiting on my review, mine approved and ready to merge, and mine waiting on someone else's
+build_pr_list() {   # every open PR of mine, plus the ones waiting on my review
   command -v gh >/dev/null || return 0
-  local cache="$HOME/.cache/repo-dash/reviews-v2.tsv"; mkdir -p "${cache%/*}"
+  local cache="$HOME/.cache/repo-dash/pr-list-v1.tsv"; mkdir -p "${cache%/*}"
   if [ -s "$cache" ] && [ -z "$(find "$cache" -mmin +5 2>/dev/null)" ]; then return 0; fi
   gh api graphql -f query='
     fragment pr on PullRequest {
-      number title url updatedAt reviewDecision mergeStateStatus baseRefName headRefName
+      number title url updatedAt isDraft reviewDecision mergeStateStatus baseRefName headRefName
       repository { name nameWithOwner } author { login }
       latestReviews(first: 10) { nodes { state author { login } } }
       reviewRequests(first: 5) { nodes { requestedReviewer { ... on User { login } ... on Team { name } } } }
       commits(last: 1) { nodes { commit { statusCheckRollup { state } } } } }
     { toMe: search(query: "'"$ORG_Q"'is:pr is:open review-requested:@me", type: ISSUE, first: 50) { nodes { ...pr } }
-      fromMe: search(query: "'"$ORG_Q"'is:pr is:open author:@me -is:draft -review:approved", type: ISSUE, first: 50) { nodes { ...pr } }
-      ready: search(query: "'"$ORG_Q"'is:pr is:open author:@me -is:draft review:approved", type: ISSUE, first: 50) { nodes { ...pr } } }' \
+      mine: search(query: "'"$ORG_Q"'is:pr is:open author:@me", type: ISSUE, first: 100) { nodes { ...pr } } }' \
     --jq '
       # "-" stands in for empty: bash read collapses consecutive tabs
       def orDash: if . == null or . == "" then "-" else . end;
       def fresh: ((now - (.updatedAt | fromdateiso8601)) / 86400) < 90;
+      def by(s): [.latestReviews.nodes[] | select(.state == s) | .author.login] | join(", ");
+      # which group a PR of mine sits in, by what stands between it and merged
+      def kind:
+        if (fresh | not) then "stale"
+        elif .isDraft then "draft"
+        elif .reviewDecision == "APPROVED" then
+          (if (.mergeStateStatus | IN("CLEAN", "HAS_HOOKS", "UNSTABLE")) then "ready" else "stuck" end)
+        elif .reviewDecision == "CHANGES_REQUESTED" then "changes"
+        else "review" end;
       def row(k): [k, .repository.name, (.number | tostring), (.title | gsub("\t"; " ")), .url, .author.login,
         (((now - (.updatedAt | fromdateiso8601)) / 3600) as $h
-          | if $h < 1 then "now" elif $h < 24 then "\($h | floor)h" else "\($h / 24 | floor)d" end),
+          | if $h < 1 then "now" elif $h < 24 then "\($h | floor)h" elif $h < 2400 then "\($h / 24 | floor)d"
+            elif $h < 8760 then "\($h / 168 | floor)w" else "\($h / 8760 | floor)y" end),
         (.commits.nodes[0].commit.statusCheckRollup.state | orDash),
         ([.reviewRequests.nodes[].requestedReviewer | (.login // .name) | select(.)] | join(", ") | orDash),
         (.reviewDecision | orDash), (.mergeStateStatus | orDash),
-        ([.latestReviews.nodes[] | select(.state == "APPROVED") | .author.login] | join(", ") | orDash),
+        ((if k == "changes" then by("CHANGES_REQUESTED") else by("APPROVED") end) | orDash),
         .repository.nameWithOwner, .baseRefName, .headRefName] | @tsv;
-      (.data.toMe.nodes[] | select(fresh) | row("in")), (.data.ready.nodes[] | row("ready")),
-      (.data.fromMe.nodes[] | select(fresh) | row("out"))' \
+      (.data.toMe.nodes[] | select(fresh) | row("in")), (.data.mine.nodes[] | row(kind))' \
     > "$cache.tmp" 2>/dev/null || { rm -f "$cache.tmp"; return 0; }
   # How far each of my PRs trails its target branch — one compare call each, in parallel.
   local tmpd i=0 line kind nwo base head
@@ -772,28 +785,32 @@ build_reviews() {   # open PRs waiting on my review, mine approved and ready to 
   mv "$cache.tmp" "$cache"
 }
 
-list_reviews() {
-  local cache="$HOME/.cache/repo-dash/reviews-v2.tsv" kind heading
-  for kind in in ready out; do
+list_prs() {   # the PRs tab: grouped by what stands between each PR and merged
+  local cache="$HOME/.cache/repo-dash/pr-list-v1.tsv" kind heading n
+  for kind in in ready stuck changes review draft stale; do
+    n=$(awk -F'\t' -v k="$kind" '$1==k' "$cache" 2>/dev/null | wc -l | tr -d ' ')
+    [ "$n" -gt 0 ] || [ "$kind" = in ] || continue
     case "$kind" in
-      in)    heading="WAITING ON YOU" ;;
-      ready) heading="READY TO MERGE" ;;
-      *)     heading="YOURS, WAITING ON OTHERS" ;;
+      in)      heading="WAITING ON YOUR REVIEW" ;;
+      ready)   heading="READY TO MERGE" ;;
+      stuck)   heading="APPROVED, NOT MERGEABLE YET" ;;
+      changes) heading="CHANGES REQUESTED" ;;
+      review)  heading="IN REVIEW" ;;
+      draft)   heading="DRAFTS" ;;
+      stale)   heading="STALE · untouched 90+ days" ;;
     esac
-    printf '%s%s%s (%s)%s\t\n' "$B" "$heading" "$R$DIM" "$(awk -F'\t' -v k="$kind" '$1==k' "$cache" 2>/dev/null | wc -l | tr -d ' ')" "$R"
+    printf '%s%s%s (%s)%s\t\n' "$B" "$heading" "$R$DIM" "$n" "$R"
     awk -F'\t' -v k="$kind" '$1==k' "$cache" 2>/dev/null \
-      | while IFS=$'\t' read -r _ repo number title url author age ci reviewers decision mstate approvers _ base _ behind; do
+      | while IFS=$'\t' read -r _ repo number title url author age ci reviewers decision mstate people _ base _ behind; do
           local who cistr dstr
           case "$ci" in
             SUCCESS) cistr="${GRN}CI ✓${R}" ;; FAILURE|ERROR) cistr="${RED}CI ✗${R}" ;;
             PENDING|EXPECTED) cistr="${YEL}CI …${R}" ;; *) cistr="" ;;
           esac
-          case "$decision" in
-            CHANGES_REQUESTED) dstr="${RED}$(pad "changes" "$W_DIFF")${R}" ;;
-            *) dstr="$(pad "" "$W_DIFF")" ;;
-          esac
-          # For approved PRs, GitHub's merge state is the thing that still stands in the way.
-          if [ "$kind" = ready ]; then
+          # For my PRs, GitHub's merge state is the thing that still stands in the way.
+          dstr="$(pad "" "$W_DIFF")"
+          if [ "$kind" = draft ] || [ "$kind" = stale ]; then dstr="${DIM}$(pad "$kind" "$W_DIFF")${R}"
+          elif [ "$kind" != in ]; then
             case "$mstate" in
               CLEAN|HAS_HOOKS) dstr="${GRN}$(pad "mergeable" "$W_DIFF")${R}" ;;
               DIRTY)    dstr="${RED}$(pad "conflicts" "$W_DIFF")${R}" ;;
@@ -803,7 +820,7 @@ list_reviews() {
             esac
           fi
           [ "$reviewers" = - ] && reviewers=""
-          [ "${approvers:--}" = - ] && approvers=""
+          [ "${people:--}" = - ] && people=""
           local bstr="" bplain=""
           case "${behind:--}" in
             -|"") ;;
@@ -813,9 +830,12 @@ list_reviews() {
           bstr="$bstr$(printf '%*s' $(( ${#bplain} < W_COMMITS ? W_COMMITS - ${#bplain} : 0 )) '')"
           [ "$kind" != in ] && [ -n "$bplain" ] && [ "${base:--}" != - ] && repo="$repo → $base"
           case "$kind" in
-            in)    who="@$author" ;;
-            ready) who="approved by ${approvers:-someone}" ;;
-            *)     who="waiting on ${reviewers:-anyone}" ;;
+            in)          who="@$author" ;;
+            ready|stuck) who="approved by ${people:-someone}" ;;
+            changes)     who="changes from ${people:-a reviewer}" ;;
+            draft)       who="not ready for review" ;;
+            stale)       who="last touched $age ago" ;;
+            *)           who="waiting on ${reviewers:-anyone}" ;;
           esac
           printf '  %s└%s %s %s %s %s %s %s\037           %s%s · %s%s\t%s\n' \
             "$DIM" "$R" "${B}$(pad "#$number" 6)${R}" "${TITLE}$(pad "$(short "$title" "$W_TITLE")" "$W_TITLE")${R}" \
@@ -825,11 +845,11 @@ list_reviews() {
   done
 }
 
-build_rows() {   # the current tab: repos and worktrees, reviews, workspaces, or parked
+build_rows() {   # the current tab: repos and worktrees, PRs, workspaces, or parked
   VIEW=$(cat "${RD_VIEW_FILE:-/dev/null}" 2>/dev/null); export VIEW
   case "$VIEW" in
     workspaces) list_workspaces ;;
-    reviews)    list_reviews ;;
+    prs)        list_prs ;;
     parked)     scan_all
                 [ -s "$PARKED_FILE" ] || printf '  %snothing parked · z on a repo or worktree holds it here%s\t\n' "$DIM" "$R" ;;
     *)          scan_all ;;
@@ -849,7 +869,7 @@ rows() {   # RD_CACHED: serve the cache if there is one · RD_REFRESH: skip a re
   if [ -n "${RD_CACHED:-}" ] && [ -s "$cache" ]; then cat "$cache"; return 0; fi
   [ "${RD_REFRESH:-}" = 1 ] && [ -n "$(find "$cache" -mtime -15s 2>/dev/null)" ] && return 0
   mkdir -p "${cache%/*}"
-  build_sessions; build_prs; build_reviews
+  build_sessions; build_prs; build_pr_list
   build_rows | tr '\n\037' '\0\n' > "$cache.$$" && mv "$cache.$$" "$cache"
   [ -n "${RD_REFRESH:-}" ] || cat "$cache"
 }
@@ -862,7 +882,7 @@ fi
 
 build_sessions
 build_prs
-{ [ "$PICK" -eq 1 ] || [ "$WATCH" -eq 1 ]; } && build_reviews
+{ [ "$PICK" -eq 1 ] || [ "$WATCH" -eq 1 ]; } && build_pr_list
 trap '[ -n "${SESSION_TSV:-}" ] && rm -f "$SESSION_TSV"' EXIT
 
 if [ "$PICK" -eq 1 ] || [ "$WATCH" -eq 1 ]; then

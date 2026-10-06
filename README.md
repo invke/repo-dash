@@ -42,6 +42,7 @@ Tabs: `1 repos` · `2 PRs` · `3 workspaces` · `4 parked`. The PRs tab lists ev
 | `g` | GitHub repo | `r` | refresh |
 | `m` | merge (merge commit, asks first) | `?` | legend |
 | `n` | new VS Code window | `j` `k` | down / up |
-| `x` | open + quit | `q` | quit |
+| `x` | open + quit | `y` | copy path (a PR copies its worktree) |
+| | | `q` | quit |
 
 `/` searches; `↵` keeps the filter, `esc` clears it. `--park [dir]` / `--unpark [dir]` work from a shell, `--help` lists the rest.

@@ -56,7 +56,7 @@ while (( $# )); do
                 shift; view=${1:-}; sum=${2:-}; leg=${3:-}
                 printf '  \033[2m%s\033[0m\n' "$(sed $'s/\033\\[[0-9;]*m//g' "$sum" 2>/dev/null)"
                 width=$(( ${FZF_COLUMNS:-120} - 4 )); line=""; plain=0
-                for k in "↵|code + claude" "c|claude" "p|PR" "g|repo" "m|merge" "n|new window" "x|open+quit" "z|park" \
+                for k in "↵|code + claude" "c|claude" "p|PR" "g|repo" "m|merge" "n|new window" "x|open+quit" "y|copy path" "z|park" \
                          "←→ 1-4|tabs" "/|search" "v|preview" "r|refresh" "?|legend" "q|quit"; do
                   key=${k%%|*}; what=${k#*|}; item="$key $what"
                   if [ "$plain" -gt 0 ] && [ $(( plain + 3 + ${#item} )) -gt "$width" ]; then
@@ -66,6 +66,8 @@ while (( $# )); do
                   line="$line$(printf '\033[1m%s\033[0m \033[2m%s\033[0m' "$key" "$what")"; plain=$((plain + ${#item}))
                 done
                 printf '%s\n' "$line"
+                flash="$HOME/.cache/repo-dash/flash"
+                [ -n "$(find "$flash" -mtime -4s 2>/dev/null)" ] && printf '\033[1;32m%s\033[0m\n' "$(cat "$flash")"
                 [ -n "${FZF_QUERY:-}" ] && printf '\033[1;33m/ %s\033[0m \033[2m· / edit · esc clear\033[0m\n' "$FZF_QUERY"
                 if [ -s "$leg" ]; then
                   printf '\033[33m●n\033[0m\033[2m uncommitted  \033[32m↑n\033[0m\033[2m unpushed  \033[31m↓n\033[0m\033[2m behind  ✗n upstream gone  \033[33m⚑\033[0m\033[2m Claude needs you\033[0m\n'
@@ -145,6 +147,30 @@ while (( $# )); do
                 esac
                 exit 0 ;;
     --toggle-park) shift; park toggle "${1:-}"; exit 0 ;;
+    --copy-path) shift  # a folder as-is; a PR as the local worktree (or repo) with its branch, else its URL
+                target=${1:-}
+                case "$target" in
+                  http*)
+                    name=${target%/pull/*}; name=${name##*/}
+                    head=$(awk -F'\t' -v u="$target" '$5==u {print $15; exit}' "$HOME/.cache/repo-dash/pr-list-v1.tsv" 2>/dev/null)
+                    # exact repo name wins; a prefix match covers repos GitHub has since renamed
+                    repo=""
+                    for d in "$REPOS"/*/; do
+                      d=${d%/}; [ -d "$d/.git" ] || continue
+                      url=$(git -C "$d" config --get remote.origin.url 2>/dev/null); url=${url%.git}; url=${url##*[/:]}; [ -n "$url" ] || continue
+                      [ "$url" = "$name" ] && { repo=$d; break; }
+                      [ -z "$repo" ] && case "$name" in "$url"*) repo=$d ;; esac
+                    done
+                    if [ -n "$repo" ]; then
+                      wt=$(git -C "$repo" worktree list --porcelain 2>/dev/null \
+                        | awk -v b="refs/heads/$head" '/^worktree /{w=substr($0,10)} $0=="branch " b {print w; exit}')
+                      target=${wt:-$repo}
+                    fi ;;
+                esac
+                [ -n "$target" ] || exit 0
+                printf '%s' "$target" | pbcopy
+                mkdir -p "$HOME/.cache/repo-dash"; printf 'copied %s' "$target" > "$HOME/.cache/repo-dash/flash"
+                exit 0 ;;
     --merge)    shift   # merge commit (not rebase) for a PR URL or a folder's branch, after a y/N
                 url=${1:-}
                 case "$url" in http*) ;; ?*) url=$(cd "$url" && gh pr view --json url --jq .url 2>/dev/null) ;; esac
@@ -615,7 +641,7 @@ pick() {   # live dashboard inside fzf: searchable, self-refreshing, openable
 
 
   # Normal mode is plain keys; / hands them back to the query until enter or esc.
-  local keys='c,p,g,m,n,x,z,v,r,?,j,k,q,left,right,1,2,3,4'
+  local keys='c,p,g,m,n,x,y,z,v,r,?,j,k,q,left,right,1,2,3,4'
   sumfile=$(mktemp); portfile=$(mktemp)
   viewfile=$(mktemp); echo repos > "$viewfile"
   legendfile=$(mktemp)
@@ -662,6 +688,7 @@ pick() {   # live dashboard inside fzf: searchable, self-refreshing, openable
     --bind "shift-tab:$prevtab,left:$prevtab" \
     --bind "1:$(jumptab repos),2:$(jumptab prs),3:$(jumptab workspaces),4:$(jumptab parked)" \
     --bind "m:execute('$self' --merge {2})+reload-sync($rowcmd)" \
+    --bind "y:execute-silent('$self' --copy-path {2})+transform-header($headercmd)" \
     --bind "z:execute-silent('$self' --toggle-park {2})+exclude+execute-silent('$self' --bg-refresh '$portfile' force)" \
     --bind "p:execute-silent('$self' --open-pr {2})" \
     --bind "g:execute-silent('$self' --open-repo {2})" \

@@ -25,10 +25,31 @@ RD_BASES="internal staging develop main master"   # first one on origin is the P
 
 ## Layout it expects
 
-- Repos are **direct children** of `$REPOS` with a normal `.git` folder.
-- Worktrees can live anywhere; ones outside `$REPOS` are flagged `⚠`.
-- The workspaces tab lists `$REPOS/_<name>.code-workspace` (display name from an optional `_<name>.claude-code.json`).
-- Claude session titles and ⚑ flags appear when worktrees have Claude desktop sessions; everything else works without.
+```
+~/Repositories/                       $REPOS
+├── my-api/                           a repo: a direct child with a real .git/ folder
+│   ├── .git/
+│   └── .claude/worktrees/feat-x/     a worktree inside the repo        ✓ listed under my-api
+├── my-api-worktrees/                 a sibling folder of worktrees     ✓ listed under my-api
+│   └── fix-login/                    (.git is a file, so not a repo of its own)
+├── clients/web/                      nested one level too deep         ✗ not scanned
+├── _platform.code-workspace          multi-root workspace              → workspaces tab
+├── _platform.claude-code.json        optional, { "name": "…" } for its display name
+└── repo-dash/
+/tmp/scratch-tree/                    a worktree outside $REPOS         ⚠ flagged
+```
+
+Worktrees are found through `git worktree list`, so they can live anywhere git knows about. Only the repos have to be direct children of `$REPOS`.
+
+## Claude desktop
+
+This part is optional. Without it the dashboard still works, but you lose session titles, the `⚑` "Claude needs you" flags and the `c` key.
+
+- **The Claude desktop app** with Code-tab sessions. It reads the app's session files from `~/Library/Application Support/Claude/claude-code-sessions/` (override with `SESSION_STORE`).
+- **One session per worktree.** A session belongs to a row when its worktree or working folder is exactly that row's path. The easiest way is to let the app create a worktree for each session. Either of its worktree locations works: `<repo>/.claude/worktrees/…`, or a sibling `<repo>-worktrees/…` folder under `$REPOS`.
+- **Archived sessions are ignored.** Archive a session in the app and its title and flag drop off the row.
+- **`⚑` text** comes from the app's end-of-turn summary of what the session needs from you. If the app hasn't written one, there's no flag.
+- **`c` and `↵`** open the session with the app's `claude://` link, so the app has to be installed on the same Mac.
 
 ## Use
 

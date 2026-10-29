@@ -57,7 +57,7 @@ while (( $# )); do
                 printf '  \033[2m%s\033[0m\n' "$(sed $'s/\033\\[[0-9;]*m//g' "$sum" 2>/dev/null)"
                 width=$(( ${FZF_COLUMNS:-120} - 4 )); line=""; plain=0
                 for k in "↵|code + claude" "c|claude" "p|PR" "g|repo" "m|merge" "n|new window" "x|open+quit" "y|copy path" "z|park" \
-                         "←→ [] 1-4|tabs" "/|search" "v|preview" "r|refresh" "?|legend" "q|quit"; do
+                         "←→ 1-4|tabs" "/|search" "v|preview" "r|refresh" "?|legend" "q|quit"; do
                   key=${k%%|*}; what=${k#*|}; item="$key $what"
                   if [ "$plain" -gt 0 ] && [ $(( plain + 3 + ${#item} )) -gt "$width" ]; then
                     printf '%s\n' "$line"; line=""; plain=0
@@ -641,7 +641,7 @@ pick() {   # live dashboard inside fzf: searchable, self-refreshing, openable
 
 
   # Normal mode is plain keys; / hands them back to the query until enter or esc.
-  local keys='c,p,g,m,n,x,y,z,v,r,?,j,k,q,left,right,[,],1,2,3,4'
+  local keys='c,p,g,m,n,x,y,z,v,r,?,j,k,q,left,right,1,2,3,4'
   sumfile=$(mktemp); portfile=$(mktemp)
   viewfile=$(mktemp); echo repos > "$viewfile"
   legendfile=$(mktemp)
@@ -684,8 +684,8 @@ pick() {   # live dashboard inside fzf: searchable, self-refreshing, openable
     --bind "v:toggle-preview" \
     --bind "?:execute-silent([ -s '$legendfile' ] && : > '$legendfile' || echo on > '$legendfile')+transform-header($headercmd)" \
     --bind "r:reload-sync($rowcmd)" \
-    --bind "tab:$nexttab,right:$nexttab,]:$nexttab" \
-    --bind "shift-tab:$prevtab,left:$prevtab,[:$prevtab" \
+    --bind "tab:$nexttab,right:$nexttab" \
+    --bind "shift-tab:$prevtab,left:$prevtab" \
     --bind "1:$(jumptab repos),2:$(jumptab prs),3:$(jumptab workspaces),4:$(jumptab parked)" \
     --bind "m:execute('$self' --merge {2})+reload-sync($rowcmd)" \
     --bind "y:execute-silent('$self' --copy-path {2})+transform-header($headercmd)" \

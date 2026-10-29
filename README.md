@@ -58,7 +58,7 @@ Tabs: `1 repos` · `2 PRs` · `3 workspaces` · `4 parked`. The PRs tab lists ev
 | key | | key | |
 |---|---|---|---|
 | `↵` | VS Code + Claude session | `z` | park / unpark |
-| `c` | Claude session | `←` `→` `1`–`4` | tabs |
+| `c` | Claude session | `←` `→` `[` `]` `1`–`4` | tabs |
 | `p` | PR | `v` | preview |
 | `g` | GitHub repo | `r` | refresh |
 | `m` | merge (merge commit, asks first) | `?` | legend |

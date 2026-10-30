@@ -40,7 +40,82 @@ park() {   # park <on|off|toggle> <path>; drops paths that no longer exist while
 }
 
 ALL=0; DEAD=0; WATCH=0; INTERVAL=30; ACTIVE=0; PR=0; PICK=0; ROWS=0; JSON=0; JSON_VIEW=repos; LAYOUT=auto
-SUMMARY=""
+SUMMARY=""; LIST=""; NOUNVERB=""
+
+usage() {
+  cat <<'USAGE'
+usage: repo-dash.sh [<noun> <verb>] [args] [flags]
+
+  dash                        the live dashboard (also what no arguments opens)
+  repo list                   repos and their worktrees, with PRs and Claude sessions
+  repo browse [dir]           the GitHub repo in the browser
+  pr list                     every open PR of yours, grouped by what's left before merge
+  pr view [dir|url]           the PR in the browser
+  pr merge [dir|url] [--yes]  merge commit, after a y/N (--yes skips it)
+  workspace list              the _*.code-workspace multi-root workspaces
+  worktree open [dir]         VS Code + the Claude session parked there
+  session open [dir]          just the Claude session
+  path copy [dir|url]         copy a folder, or a PR's local worktree, to the clipboard
+  park list                   what's held out of the repos tab
+  park add|remove [dir]       hold a repo or worktree out of the repos tab, or bring it back
+
+  [dir] defaults to the checkout you're in. list verbs print a table at a terminal
+  and JSON when piped; --json forces JSON.
+
+filters for dash and repo list:
+  -a, --all         every repo, not just the ones with something going on
+  -A, --active      only repos that have worktrees (what you're actually working on)
+  -d, --dead        also list branches whose upstream is gone (cleanup view)
+      --narrow      force the tall/narrow layout (preview below, tight columns)
+      --wide        force the wide layout (preview to the right)
+      --layout      print what layout this terminal resolves to, and why
+
+old flags (still work): -i/--pick, -w/--watch [n], -p/--pr, --park/--unpark [dir], --json [tab]
+USAGE
+}
+
+hint() {   # an old flag still works, but says what replaced it
+  [ -n "$NOUNVERB" ] || printf 'repo-dash: now "repo-dash.sh %s"\n' "$1" >&2
+}
+
+here() {   # a URL as-is; a folder (default: the one you're in) as its checkout's top level
+  case "${1:-}" in http*) printf '%s' "$1"; return 0 ;; esac
+  local d=${1:-$PWD}
+  [ -d "$d" ] || { echo "not a directory: $d" >&2; return 1; }
+  git -C "$d" rev-parse --show-toplevel 2>/dev/null || (cd "$d" && pwd -P)
+}
+
+# Noun-verb commands rewrite themselves into the flags the loop below already knows.
+case "${1:-}" in
+  "")   NOUNVERB=1; set -- --pick --pr ;;
+  dash) NOUNVERB=1; shift; set -- --pick --pr "$@" ;;
+  help) usage; exit 0 ;;
+  repo|pr|workspace|worktree|session|path|park)
+    NOUNVERB=1; noun=$1; verb=${2:-}; shift; [ $# -gt 0 ] && shift
+    case "$noun $verb" in
+      "repo list")      LIST=repos; set -- --pr "$@" ;;
+      "pr list")        LIST=prs; set -- --pr "$@" ;;
+      "workspace list") LIST=workspaces ;;
+      "park list")      LIST=parked; set -- --pr "$@" ;;
+      "park add")       set -- --park "$@" ;;
+      "park remove")    set -- --unpark "$@" ;;
+      "pr merge")
+        t=""
+        for a in "$@"; do case "$a" in -y|--yes) export RD_YES=1 ;; *) t=$a ;; esac; done
+        t=$(here "$t") || exit 1; set -- --merge "$t" ;;
+      "pr view"|"repo browse"|"worktree open"|"session open"|"path copy")
+        t=$(here "${1:-}") || exit 1
+        case "$noun $verb" in
+          "pr view")       set -- --open-pr "$t" ;;
+          "repo browse")   set -- --open-repo "$t" ;;
+          "worktree open") set -- --open "$t" ;;
+          "session open")  set -- --open-claude "$t" ;;
+          "path copy")     set -- --copy-path "$t" ;;
+        esac ;;
+      *) echo "repo-dash: unknown command \"$noun $verb\" (repo-dash.sh help)" >&2; exit 2 ;;
+    esac ;;
+esac
+
 while (( $# )); do
   case "$1" in
     -a|--all)   ALL=1 ;;
@@ -48,7 +123,11 @@ while (( $# )); do
     -p|--pr)    PR=1 ;;
     -i|--pick)  PICK=1 ;;
     --rows)     ROWS=1 ;;
-    --json)     JSON=1; case "${2:-}" in repos|prs|workspaces|parked) JSON_VIEW=$2; shift ;; esac ;;
+    --json)     JSON=1; case "${2:-}" in repos|prs|workspaces|parked) JSON_VIEW=$2; shift ;; esac
+                if [ -z "$LIST" ]; then
+                  case "$JSON_VIEW" in workspaces) hint "workspace list --json" ;; parked) hint "park list --json" ;;
+                                       prs) hint "pr list --json" ;; *) hint "repo list --json" ;; esac
+                fi ;;
     --narrow)   LAYOUT=narrow ;;
     --wide)     LAYOUT=wide ;;
     --layout)   LAYOUT_INFO=1 ;;
@@ -175,22 +254,26 @@ while (( $# )); do
     --merge)    shift   # merge commit (not rebase) for a PR URL or a folder's branch, after a y/N
                 url=${1:-}
                 case "$url" in http*) ;; ?*) url=$(cd "$url" && gh pr view --json url --jq .url 2>/dev/null) ;; esac
-                [ -n "$url" ] || { printf 'no PR here\n'; read -rsn1 -p $'\033[2many key\033[0m'; exit 0; }
+                # RD_YES (pr merge --yes): the caller already asked, so no prompt and no "any key" pauses
+                [ -n "$url" ] || { printf 'no PR here\n'; [ -n "${RD_YES:-}" ] && exit 1; read -rsn1 -p $'\033[2many key\033[0m'; exit 0; }
                 gh pr view "$url" --json number,title,baseRefName,headRefName,mergeStateStatus,reviewDecision \
                   --jq '"\u001b[1;95m#\(.number)\u001b[0m \u001b[1;97m\(.title)\u001b[0m\n  \(.headRefName) → \(.baseRefName)  \u001b[2m\(.reviewDecision // "") · \(.mergeStateStatus)\u001b[0m"'
-                printf '\nmerge with a merge commit? [y/N] '; read -rsn1 yn; printf '%s\n' "$yn"
+                if [ -n "${RD_YES:-}" ]; then yn=y
+                else printf '\nmerge with a merge commit? [y/N] '; read -rsn1 yn; printf '%s\n' "$yn"; fi
+                rc=0
                 if [ "$yn" = y ] || [ "$yn" = Y ]; then
-                  gh pr merge "$url" --merge && rm -f "$HOME/.cache/repo-dash/pr-list-v1.tsv" "$HOME/.cache/repo-dash/prs-v2.tsv"
-                  read -rsn1 -p $'\033[2many key\033[0m'
+                  gh pr merge "$url" --merge && rm -f "$HOME/.cache/repo-dash/pr-list-v1.tsv" "$HOME/.cache/repo-dash/prs-v2.tsv" || rc=1
+                  [ -n "${RD_YES:-}" ] || read -rsn1 -p $'\033[2many key\033[0m'
                 fi
-                exit 0 ;;
+                exit $rc ;;
     --bg-refresh) shift  # rebuild the current tab off the UI thread, then swap the cached rows in
                 ( export RD_REFRESH=${2:-1}; eval "$RD_ROWCMD" >/dev/null
                   port=$(cat "${1:-}" 2>/dev/null)
                   [ -n "$port" ] && curl -s -XPOST "localhost:$port" -d "reload-sync($RD_CACHEDCMD)" ) >/dev/null 2>&1 </dev/null &
                 exit 0 ;;
     --park|--unpark)
-                mode=on; [ "$1" = --unpark ] && mode=off; shift
+                mode=on; [ "$1" = --unpark ] && mode=off
+                if [ "$mode" = on ]; then hint "park add [dir]"; else hint "park remove [dir]"; fi; shift
                 target=${1:-$PWD}; [ -d "$target" ] || { echo "not a directory: $target" >&2; exit 1; }
                 target=$(git -C "$target" rev-parse --show-toplevel 2>/dev/null || printf '%s' "$target")
                 park "$mode" "$target"
@@ -198,27 +281,13 @@ while (( $# )); do
                 exit 0 ;;
     -d|--dead)  DEAD=1 ;;
     -w|--watch) WATCH=1; [[ "${2:-}" =~ ^[0-9]+$ ]] && { INTERVAL=$2; shift; } ;;
-    -h|--help)
-      cat <<'USAGE'
-usage: repo-dash.sh [options]
-  -a, --all         every repo, not just the ones with something going on
-  -A, --active      only repos that have worktrees (what you're actually working on)
-  -p, --pr          annotate branches with their open PR (one GitHub call, cached 5 min)
-  -i, --pick        interactive overview: live dashboard you can search and open from
-  -w, --watch [n]   the same interactive view (alias for --pick; n sets the refresh)
-  -d, --dead        also list branches whose upstream is gone (cleanup view)
-      --park [dir]    hold a repo or worktree out of the repos tab (default: the one you're in)
-      --unpark [dir]  bring it back; ⌥p toggles either from the picker
-      --narrow      force the tall/narrow layout (preview below, tight columns)
-      --wide        force the wide layout (preview to the right)
-      --layout      print what layout this terminal resolves to, and why
-      --json [tab]  one tab as JSON instead of the dashboard: repos (default), prs, workspaces, parked
-USAGE
-      exit 0 ;;
+    -h|--help)  usage; exit 0 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
   shift
 done
+# list verbs: a table at a terminal, JSON when piped
+if [ -n "$LIST" ]; then JSON_VIEW=$LIST; [ -t 1 ] || JSON=1; fi
 
 if [ "$JSON" -eq 0 ] && { [ -n "${RD_FORCE_COLOR:-}" ] || { [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; }; }; then
   B=$'\033[1m'; DIM=$'\033[2m'; R=$'\033[0m'; HEAD1=$'\033[1;95m'; TITLE=$'\033[1;97m'
@@ -781,11 +850,17 @@ legend() {
   return 0
 }
 
-render() {   # plain, non-interactive: same rows with the path column stripped
-  local sf body
+render() {   # plain, non-interactive: the tab's rows with the path column stripped
+  local sf body title=REPOSITORIES
   sf=$(mktemp)
-  body=$(RD_SUMMARY_FILE="$sf" scan_all)
-  printf '%s%s%s  %s%s%s\n\n' "$B" "REPOSITORIES" "$R" "$DIM" "$(date '+%H:%M')" "$R"
+  case "${LIST:-repos}" in
+    prs)        title="PULL REQUESTS"; build_pr_list; body=$(list_prs) ;;
+    workspaces) title=WORKSPACES; body=$(list_workspaces) ;;
+    parked)     title=PARKED; VIEW=parked; export VIEW; body=$(RD_SUMMARY_FILE="$sf" scan_all)
+                [ -n "$body" ] || body="  ${DIM}nothing parked · repo-dash.sh park add [dir]${R}" ;;
+    *)          body=$(RD_SUMMARY_FILE="$sf" scan_all) ;;
+  esac
+  printf '%s%s%s  %s%s%s\n\n' "$B" "$title" "$R" "$DIM" "$(date '+%H:%M')" "$R"
   printf '%s\n' "$body" | tr '\037' '\n' | cut -f1
   printf '\n'
   cat "$sf" 2>/dev/null

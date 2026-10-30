@@ -67,3 +67,14 @@ Tabs: `1 repos` · `2 PRs` · `3 workspaces` · `4 parked`. The PRs tab lists ev
 | | | `q` | quit |
 
 `/` searches; `↵` keeps the filter, `esc` clears it. `--park [dir]` / `--unpark [dir]` work from a shell, `--help` lists the rest.
+
+## JSON
+
+`--json [repos|prs|workspaces|parked]` prints one tab as a single JSON document instead of the dashboard, for building other front ends on (a Raycast extension, a menu bar item). It takes the same filters as the dashboard:
+
+```bash
+repo-dash.sh --json --active --pr     # repos tab: { view, generatedAt, summary, rows }
+repo-dash.sh --json prs               # PRs tab, rows in the same group order
+```
+
+Each row has a `kind`: `repo`, `worktree` (with its `pr` and Claude `session`, whose `id` opens as `claude://claude.ai/epitaxy/<id>`), `gone-branch` (with `--dead`), `workspace` or `pr`. The PRs tab's `group` is `review-requested`, `ready`, `stuck`, `changes`, `review`, `draft` or `stale`.

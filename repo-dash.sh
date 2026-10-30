@@ -39,7 +39,7 @@ park() {   # park <on|off|toggle> <path>; drops paths that no longer exist while
   mv "$tmp" "$PARKED_FILE"
 }
 
-ALL=0; DEAD=0; WATCH=0; INTERVAL=30; ACTIVE=0; PR=0; PICK=0; ROWS=0; LAYOUT=auto
+ALL=0; DEAD=0; WATCH=0; INTERVAL=30; ACTIVE=0; PR=0; PICK=0; ROWS=0; JSON=0; JSON_VIEW=repos; LAYOUT=auto
 SUMMARY=""
 while (( $# )); do
   case "$1" in
@@ -48,6 +48,7 @@ while (( $# )); do
     -p|--pr)    PR=1 ;;
     -i|--pick)  PICK=1 ;;
     --rows)     ROWS=1 ;;
+    --json)     JSON=1; case "${2:-}" in repos|prs|workspaces|parked) JSON_VIEW=$2; shift ;; esac ;;
     --narrow)   LAYOUT=narrow ;;
     --wide)     LAYOUT=wide ;;
     --layout)   LAYOUT_INFO=1 ;;
@@ -211,6 +212,7 @@ usage: repo-dash.sh [options]
       --narrow      force the tall/narrow layout (preview below, tight columns)
       --wide        force the wide layout (preview to the right)
       --layout      print what layout this terminal resolves to, and why
+      --json [tab]  one tab as JSON instead of the dashboard: repos (default), prs, workspaces, parked
 USAGE
       exit 0 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
@@ -218,7 +220,7 @@ USAGE
   shift
 done
 
-if [ -n "${RD_FORCE_COLOR:-}" ] || { [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; }; then
+if [ "$JSON" -eq 0 ] && { [ -n "${RD_FORCE_COLOR:-}" ] || { [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; }; }; then
   B=$'\033[1m'; DIM=$'\033[2m'; R=$'\033[0m'; HEAD1=$'\033[1;95m'; TITLE=$'\033[1;97m'
   RED=$'\033[31m'; GRN=$'\033[32m'; YEL=$'\033[33m'; BLU=$'\033[34m'; CYN=$'\033[36m'
 else
@@ -290,7 +292,12 @@ if [ -n "${LAYOUT_INFO:-}" ]; then
   exit 0
 fi
 
-export B DIM R HEAD1 TITLE RED GRN YEL BLU CYN ALL DEAD REPOS ACTIVE PR
+export B DIM R HEAD1 TITLE RED GRN YEL BLU CYN ALL DEAD REPOS ACTIVE PR JSON
+# --json: a pr_line (tab-separated) as an object, or null when there's no PR
+JQ_PR='def nz: if . == "" then null else . end;
+  def pr: if . == "" then null else split("\t") as $f
+    | {number: ($f[2] | tonumber), state: ($f[3] | nz), ci: ($f[4] | nz), base: ($f[5] | nz), title: $f[6]} end;'
+export JQ_PR
 export NARROW TALL TERM_COLS TERM_ROWS LIST_COLS W_REPO W_HEAD W_TITLE W_STATS W_DIFF W_COMMITS W_WS W_DEAD PREVIEW_WIN
 
 short() { local s=$1 n=$2; if [ ${#s} -gt "$n" ]; then printf '%s…' "${s:0:$((n-1))}"; else printf '%s' "$s"; fi; }
@@ -389,10 +396,17 @@ scan_repo() {
   local rname="${HEAD1}${name}${R}  ${CYN}${rhead}${R}"
   [ -n "$rpr" ] && { rname="$rname $rpr"; rplain="$rplain #$(printf '%s' "$rpl" | cut -f3)"; }
   last=$(git -C "$dir" log -1 --format='%cr · %s' 2>/dev/null)
-  { printf '%s%s %s %s %s %s\037  %s%s%s\t%s\n' \
+  if [ "$JSON" -eq 1 ]; then
+    jq -nc --arg path "$dir" --arg repo "$name" --arg branch "$head" --arg pr "$rpl" --arg last "$last" \
+      --argjson dirty "$dirty" --argjson ahead "$ahead" --argjson behind "$behind" --argjson gone "$dead" \
+      --argjson parked "$rparked" "$JQ_PR"'
+      {kind: "repo", path: $path, repo: $repo, branch: $branch, dirty: $dirty, ahead: $ahead, behind: $behind,
+       goneBranches: $gone, parked: ($parked == 1), pr: ($pr | pr), lastCommit: ($last | nz)}' > "$out"
+  else { printf '%s%s %s %s %s %s\037  %s%s%s\t%s\n' \
       "$rname" "$(printf '%*s' $(( ${#rplain} < 11 + W_TITLE ? 11 + W_TITLE - ${#rplain} : 0 )) '')" \
       "$rmark" "$rtrack" "$rdead" "$rcistr" \
       "$DIM" "$(short "$last" $((W_TITLE + W_STATS + 8)))" "$R" "$dir"; } > "$out"
+  fi
 
   # Worktrees are two-line cards; \037 marks the inner line break until fzf's --read0 sees it.
   local wt br wdirty title action mark repobase
@@ -419,16 +433,16 @@ scan_repo() {
     ci=$(printf '%s' "$pl" | cut -f5); base=$(printf '%s' "$pl" | cut -f6)
     base=${base:+origin/$base}; base=${base:-$repobase}
 
-    title=""; action=""
-    case "$wt" in "$REPOS"/*) ;; *) title="⚠ outside ~/Repositories";; esac
-    if [ -z "$title" ] && [ -f "${SESSION_TSV:-}" ]; then
-      IFS=$'\t' read -r title action < <(awk -F'\t' -v p="$wt" '$1==p{print $2 "\t" $3; exit}' "$SESSION_TSV")
-    fi
+    local outside=0 sid="" stitle=""; action=""
+    case "$wt" in "$REPOS"/*) ;; *) outside=1 ;; esac
+    # sid and title are never empty, so read's collapsing of tabs only ever eats a missing action
+    [ -f "${SESSION_TSV:-}" ] \
+      && IFS=$'\t' read -r sid stitle action < <(awk -F'\t' -v p="$wt" '$1==p{print $2 "\t" $3 "\t" $4; exit}' "$SESSION_TSV")
     # Titles lead with "repo number · " — the row already shows both.
-    case "$title" in *" · "*) title="${title#* · }";; esac
+    title=$stitle; case "$title" in *" · "*) title="${title#* · }";; esac
     # A session outlives the PR it was named for, so the PR's own title wins.
     local prtitle; prtitle=$(printf '%s' "$pl" | cut -f7)
-    case "$title" in "⚠"*) ;; *) [ -n "$prtitle" ] && title=$prtitle ;; esac
+    [ -n "$prtitle" ] && title=$prtitle
     if [ -z "$title" ]; then
       if [ "$br" = "(detached)" ]; then title=${wt##*/}; else title=${br#*/}; fi
     fi
@@ -440,6 +454,20 @@ scan_repo() {
       ins=$(printf '%s' "$stat" | sed -n 's/.* \([0-9]*\) insertion.*/\1/p'); ins=${ins:-0}
       del=$(printf '%s' "$stat" | sed -n 's/.* \([0-9]*\) deletion.*/\1/p'); del=${del:-0}
     fi
+
+    if [ "$JSON" -eq 1 ]; then
+      local wparked=$rparked; is_parked "$wt" && wparked=1
+      jq -nc --arg path "$wt" --arg repo "$name" --arg repoPath "$dir" --arg branch "$br" --arg title "$title" \
+        --arg base "$base" --arg pr "$pl" --arg sid "$sid" --arg stitle "$stitle" --arg action "$action" \
+        --argjson dirty "$wdirty" --argjson commits "$commits" --argjson ins "$ins" --argjson del "$del" \
+        --argjson parked "$wparked" --argjson outside "$outside" "$JQ_PR"'
+        {kind: "worktree", path: $path, repo: $repo, repoPath: $repoPath, branch: $branch, title: $title,
+         dirty: $dirty, base: ($base | nz), commits: $commits, insertions: $ins, deletions: $del,
+         parked: ($parked == 1), outsideRepos: ($outside == 1), pr: ($pr | pr),
+         session: (if $sid == "" then null else {id: $sid, title: $stitle, needsAction: ($action | nz)} end)}' >> "$out"
+      continue
+    fi
+    [ "$outside" -eq 1 ] && { title="⚠ outside ~/Repositories"; action=""; }
     diff=""; [ "$commits" -gt 0 ] && diff="${GRN}+${ins}${R} ${RED}-${del}${R}"
     local dplain="+${ins} -${del}"; [ "$commits" -gt 0 ] || dplain=""
     diff="$diff$(printf '%*s' $(( ${#dplain} < W_DIFF ? W_DIFF - ${#dplain} : 0 )) '')"
@@ -473,7 +501,13 @@ scan_repo() {
     interesting=1
     git -C "$dir" for-each-ref --format='%(refname:short) %(upstream:track)' refs/heads 2>/dev/null \
       | grep 'gone' | awk '{print $1}' \
-      | while IFS= read -r br; do printf '  %s✗ %s%s\t%s\n' "$DIM" "$(short "$br" "$W_DEAD")" "$R" "$dir" >> "$out"; done
+      | while IFS= read -r br; do
+          if [ "$JSON" -eq 1 ]; then
+            jq -nc --arg path "$dir" --arg repo "$name" --arg branch "$br" '{kind: "gone-branch", path: $path, repo: $repo, branch: $branch}'
+          else
+            printf '  %s✗ %s%s\t%s\n' "$DIM" "$(short "$br" "$W_DEAD")" "$R" "$dir"
+          fi >> "$out"
+        done
   fi
 
   printf '%s\t%s\t%s\n' "$nwt" "$dirty" "$dead" > "$out.stats"
@@ -492,7 +526,7 @@ build_sessions() {
   SESSION_TSV=$(mktemp)
   find "$SESSION_STORE" -name '*.json' -print0 2>/dev/null \
     | xargs -0 jq -r 'select(.isArchived != true) | select((.worktreePath // .cwd) != null)
-                      | [(.worktreePath // .cwd), (.title // "untitled"),
+                      | [(.worktreePath // .cwd), .sessionId, (.title // "untitled"),
                          (.postTurnSummary.needs_action // "")] | @tsv' 2>/dev/null \
     > "$SESSION_TSV"
   export SESSION_TSV
@@ -619,6 +653,7 @@ list_workspaces() {   # the _*.code-workspace multi-root workspaces
     [ -f "$REPOS/_$slug.claude-code.json" ] && command -v jq >/dev/null \
       && name=$(jsonc "$REPOS/_$slug.claude-code.json" | jq -r '.name // empty' 2>/dev/null)
     [ -n "$name" ] || name=$slug
+    [ "$JSON" -eq 1 ] && { jq -nc --arg name "$name" --arg path "$ws" '{kind: "workspace", name: $name, path: $path}'; continue; }
     printf '%sWS%s %s%-*s%s %sworkspace%s\t%s\n' \
       "$YEL" "$R" "$B" "$W_WS" "$(short "$name" "$W_WS")" "$R" "$DIM" "$R" "$ws"
   done
@@ -724,6 +759,7 @@ scan_all() {   # every repo+worktree row, each with a trailing tab + path
   rm -rf "$tmp"
 
   local n_parked; n_parked=$(awk 'END{print NR}' "$PARKED_FILE" 2>/dev/null)
+  RD_STATS="${#repos[@]} $n_wt $n_dirty $n_dead ${n_parked:-0}"
   [ "${VIEW:-}" = parked ] || { mkdir -p "$HOME/.cache/repo-dash"; printf '%s\n' "$n_wt" > "$HOME/.cache/repo-dash/count-repos"; }
   SUMMARY=$(printf '%s%s repos · %s worktrees · %s dirty · %s dead branches · %s parked · %s%s' \
     "$DIM" "${#repos[@]}" "$n_wt" "$n_dirty" "$n_dead" "${n_parked:-0}" "$(date '+%H:%M:%S')" "$R")
@@ -872,6 +908,41 @@ list_prs() {   # the PRs tab: grouped by what stands between each PR and merged
   done
 }
 
+json_prs() {   # the PRs tab's cache as objects, in the same group order
+  local cache="$HOME/.cache/repo-dash/pr-list-v1.tsv" kind
+  for kind in in ready stuck changes review draft stale; do
+    awk -F'\t' -v k="$kind" '$1==k' "$cache" 2>/dev/null
+  done | jq -Rc 'split("\t") | map(if . == "-" then null else . end) as $f
+    | def list: if . == null then [] else split(", ") end;
+      {kind: "pr", group: (if $f[0] == "in" then "review-requested" else $f[0] end),
+       repo: $f[1], nameWithOwner: $f[12], number: ($f[2] | tonumber), title: $f[3], url: $f[4],
+       author: $f[5], age: $f[6], ci: $f[7], reviewers: ($f[8] | list), reviewDecision: $f[9],
+       mergeState: $f[10], decidedBy: ($f[11] | list), base: $f[13], head: $f[14],
+       behind: ($f[15] | if . == null then null else tonumber end)}'
+}
+
+json_out() {   # one tab as a single JSON document, for anything that isn't fzf (e.g. Raycast)
+  command -v jq >/dev/null || { echo "--json needs jq" >&2; exit 1; }
+  VIEW=$JSON_VIEW; export VIEW
+  local rows; rows=$(mktemp)
+  build_sessions; build_prs
+  case "$VIEW" in
+    prs)        build_pr_list; json_prs > "$rows" ;;
+    workspaces) list_workspaces > "$rows" ;;
+    *)          scan_all > "$rows" ;;
+  esac
+  # shellcheck disable=SC2086
+  set -- ${RD_STATS:-}
+  jq -sc --arg view "$VIEW" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    --arg repos "${1:-}" --arg wts "${2:-}" --arg dirty "${3:-}" --arg gone "${4:-}" --arg parked "${5:-}" '
+    {view: $view, generatedAt: $at,
+     summary: (if $repos == "" then null else
+       {repos: ($repos | tonumber), worktrees: ($wts | tonumber), dirtyRepos: ($dirty | tonumber),
+        goneBranches: ($gone | tonumber), parked: ($parked | tonumber)} end),
+     rows: .}' "$rows"
+  rm -f "$rows"
+}
+
 build_rows() {   # the current tab: repos and worktrees, PRs, workspaces, or parked
   VIEW=$(cat "${RD_VIEW_FILE:-/dev/null}" 2>/dev/null); export VIEW
   case "$VIEW" in
@@ -903,6 +974,12 @@ rows() {   # RD_CACHED: serve the cache if there is one · RD_REFRESH: skip a re
 
 if [ "$ROWS" -eq 1 ]; then
   rows
+  [ -n "${SESSION_TSV:-}" ] && rm -f "$SESSION_TSV"
+  exit 0
+fi
+
+if [ "$JSON" -eq 1 ]; then
+  json_out
   [ -n "${SESSION_TSV:-}" ] && rm -f "$SESSION_TSV"
   exit 0
 fi

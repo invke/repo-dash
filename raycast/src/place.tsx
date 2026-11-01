@@ -1,5 +1,5 @@
 import { Action, ActionPanel, Color, Icon, List, showToast, Toast } from "@raycast/api";
-import { ciAccessory, openSession, Pr, rd, RepoRow, WorkspaceRow, WorktreeRow } from "./rd";
+import { ciAccessory, openSession, Pr, rd, RepoRow, Session, WorkspaceRow, WorktreeRow } from "./rd";
 
 export type Place = RepoRow | WorktreeRow | WorkspaceRow;
 
@@ -49,12 +49,15 @@ export async function runToast(args: string[], title: string, done?: () => void)
   }
 }
 
-export function openPlace(row: Place): Promise<string> {
+// what the actions need: a full row, or a light one from place list
+type Actionable = { kind: string; path: string; parked?: boolean; pr?: Pr | null; session?: Session | null };
+
+export function openPlace(row: Actionable): Promise<string> {
   return rd(row.kind === "workspace" ? ["workspace", "open", row.path] : ["worktree", "open", row.path]);
 }
 
-export function PlaceActions({ row, refresh, onOpen }: { row: Place; refresh: () => void; onOpen?: () => void }) {
-  const session = row.kind === "worktree" ? row.session : null;
+export function PlaceActions({ row, refresh, onOpen }: { row: Actionable; refresh: () => void; onOpen?: () => void }) {
+  const session = row.session ?? null;
   const git = row.kind !== "workspace" ? row : null;
   return (
     <ActionPanel>

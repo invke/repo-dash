@@ -41,6 +41,18 @@ export type WorktreeRow = {
 
 export type WorkspaceRow = { kind: "workspace"; name: string; path: string };
 
+// place list: just enough to switch to a checkout, without status, diffs or PRs
+export type PlaceRow = {
+  kind: "repo" | "worktree";
+  path: string;
+  repo: string;
+  branch: string;
+  title: string;
+  parked: boolean;
+  lastActivity: number;
+  session: Session | null;
+};
+
 export type PrRow = {
   kind: "pr";
   group: "review-requested" | "ready" | "stuck" | "changes" | "review" | "draft" | "stale";

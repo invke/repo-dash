@@ -4,7 +4,7 @@ The repo-dash dashboard as Raycast commands. Everything comes from `repo-dash.sh
 
 | command | |
 |---|---|
-| **Switch to** | every worktree, repo and `.code-workspace`, most used first (unvisited ones by last activity); ↵ opens VS Code + the Claude session |
+| **Switch to** | every worktree, repo and `.code-workspace`, most used first (unvisited ones by last activity); ↵ opens VS Code + the Claude session. Reads `rd place list`, so it skips status and PRs and loads in under a second |
 | **Needs Me** | Claude sessions waiting on you, reviews waiting on you, your PRs with changes requested / failing CI / conflicts, and ones ready to merge |
 | **New Worktree** | `feat/fix/chore/…` + a few words → a branch cut from staging into `<repo>-worktrees/`, opened in VS Code |
 | **Repos** · **Pull Requests** | the dashboard's repos and PRs tabs |

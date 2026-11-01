@@ -1,0 +1,73 @@
+{
+  "$schema": "https://www.raycast.com/schemas/extension.json",
+  "name": "repo-dash",
+  "title": "Repo Dash",
+  "description": "Your repos, worktrees, PRs and parked Claude sessions, from repo-dash.sh.",
+  "icon": "icon.png",
+  "author": "invke",
+  "categories": [
+    "Developer Tools"
+  ],
+  "license": "MIT",
+  "preferences": [
+    {
+      "name": "script",
+      "title": "repo-dash.sh",
+      "description": "Path to repo-dash.sh",
+      "type": "textfield",
+      "required": false,
+      "default": "~/Repositories/repo-dash/repo-dash.sh"
+    },
+    {
+      "name": "activeOnly",
+      "title": "Repos",
+      "label": "Only repos with worktrees",
+      "description": "Like rd dash --active",
+      "type": "checkbox",
+      "required": false,
+      "default": true
+    }
+  ],
+  "commands": [
+    {
+      "name": "repos",
+      "title": "Repos",
+      "subtitle": "Repo Dash",
+      "description": "Repos and worktrees with their PRs and Claude sessions",
+      "mode": "view"
+    },
+    {
+      "name": "prs",
+      "title": "Pull Requests",
+      "subtitle": "Repo Dash",
+      "description": "Your open PRs, grouped by what's left before merge",
+      "mode": "view"
+    },
+    {
+      "name": "menu-bar",
+      "title": "Repo Dash Menu Bar",
+      "subtitle": "Repo Dash",
+      "description": "Claude sessions that need you and PRs ready to merge",
+      "mode": "menu-bar",
+      "interval": "5m"
+    }
+  ],
+  "dependencies": {
+    "@raycast/api": "^1.104.25",
+    "@raycast/utils": "^1.19.1"
+  },
+  "devDependencies": {
+    "@raycast/eslint-config": "^1.0.11",
+    "@types/node": "22.19.17",
+    "@types/react": "19.0.10",
+    "eslint": "^8.57.0",
+    "prettier": "^3.3.3",
+    "typescript": "^5.4.5"
+  },
+  "scripts": {
+    "build": "ray build -e dist",
+    "dev": "ray develop",
+    "fix-lint": "ray lint --fix",
+    "lint": "ray lint"
+  }
+}

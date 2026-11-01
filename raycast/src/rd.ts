@@ -17,6 +17,7 @@ export type RepoRow = {
   parked: boolean;
   pr: Pr | null;
   lastCommit: string | null;
+  lastActivity: number;
 };
 
 export type WorktreeRow = {
@@ -35,7 +36,10 @@ export type WorktreeRow = {
   outsideRepos: boolean;
   pr: Pr | null;
   session: Session | null;
+  lastActivity: number;
 };
+
+export type WorkspaceRow = { kind: "workspace"; name: string; path: string };
 
 export type PrRow = {
   kind: "pr";

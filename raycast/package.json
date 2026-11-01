@@ -30,6 +30,27 @@
   ],
   "commands": [
     {
+      "name": "switch-to",
+      "title": "Switch to",
+      "subtitle": "Repo Dash",
+      "description": "Jump to any worktree, repo or workspace, most used first",
+      "mode": "view"
+    },
+    {
+      "name": "needs-me",
+      "title": "Needs Me",
+      "subtitle": "Repo Dash",
+      "description": "Claude sessions waiting on you, reviews, and PRs that need work or are ready to merge",
+      "mode": "view"
+    },
+    {
+      "name": "new-worktree",
+      "title": "New Worktree",
+      "subtitle": "Repo Dash",
+      "description": "Cut a new branch into its own worktree and open it",
+      "mode": "view"
+    },
+    {
       "name": "repos",
       "title": "Repos",
       "subtitle": "Repo Dash",

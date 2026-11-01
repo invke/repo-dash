@@ -79,7 +79,9 @@ Outside the dashboard it's `rd <noun> <verb>`. `[dir]` defaults to the checkout 
 | `rd repo list` · `rd pr list` · `rd workspace list` · `rd park list` | a tab as a table |
 | `rd pr view [dir\|url]` · `rd pr merge [dir\|url] [--yes]` | the PR in the browser · merge commit after a y/N |
 | `rd repo browse [dir]` | the GitHub repo |
+| `rd worktree new <repo> <branch> [--base b]` | cut a branch from staging (the first of `RD_BASES`) into `<repo>-worktrees/`; prints its path |
 | `rd worktree open [dir]` · `rd session open [dir]` | VS Code + Claude session · just the session |
+| `rd workspace open <file>` | a `.code-workspace` in VS Code |
 | `rd path copy [dir\|url]` | a folder, or a PR's local worktree, to the clipboard |
 | `rd park add\|remove [dir]` | hold it out of the repos tab, or bring it back |
 

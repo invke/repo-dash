@@ -53,6 +53,10 @@ usage: repo-dash.sh [<noun> <verb>] [args] [flags]
   pr view [dir|url]           the PR in the browser
   pr merge [dir|url] [--yes]  merge commit, after a y/N (--yes skips it)
   workspace list              the _*.code-workspace multi-root workspaces
+  workspace open <file>       a workspace in VS Code
+  worktree new <repo> <branch> [--base <branch>]
+                              a new branch in <repo>-worktrees/, cut from the first of
+                              RD_BASES on origin; prints its path
   worktree open [dir]         VS Code + the Claude session parked there
   session open [dir]          just the Claude session
   path copy [dir|url]         copy a folder, or a PR's local worktree, to the clipboard
@@ -96,6 +100,14 @@ case "${1:-}" in
       "repo list")      LIST=repos; set -- --pr "$@" ;;
       "pr list")        LIST=prs; set -- --pr "$@" ;;
       "workspace list") LIST=workspaces ;;
+      "workspace open")
+        [ -f "${1:-}" ] || { echo "not a workspace file: ${1:-}" >&2; exit 1; }
+        set -- --open "$1" ;;
+      "worktree new")
+        NEW_REPO=${1:-}; NEW_BRANCH=${2:-}; NEW_BASE=""
+        [ "${3:-}" = --base ] && NEW_BASE=${4:-}
+        [ -n "$NEW_REPO" ] && [ -n "$NEW_BRANCH" ] || { echo "usage: repo-dash.sh worktree new <repo> <branch> [--base <branch>]" >&2; exit 2; }
+        set -- ;;
       "park list")      LIST=parked; set -- --pr "$@" ;;
       "park add")       set -- --park "$@" ;;
       "park remove")    set -- --unpark "$@" ;;
@@ -466,11 +478,13 @@ scan_repo() {
   [ -n "$rpr" ] && { rname="$rname $rpr"; rplain="$rplain #$(printf '%s' "$rpl" | cut -f3)"; }
   last=$(git -C "$dir" log -1 --format='%cr · %s' 2>/dev/null)
   if [ "$JSON" -eq 1 ]; then
+    local rat; rat=$(git -C "$dir" log -1 --format=%ct 2>/dev/null)
     jq -nc --arg path "$dir" --arg repo "$name" --arg branch "$head" --arg pr "$rpl" --arg last "$last" \
       --argjson dirty "$dirty" --argjson ahead "$ahead" --argjson behind "$behind" --argjson gone "$dead" \
-      --argjson parked "$rparked" "$JQ_PR"'
+      --argjson parked "$rparked" --argjson at "${rat:-0}" "$JQ_PR"'
       {kind: "repo", path: $path, repo: $repo, branch: $branch, dirty: $dirty, ahead: $ahead, behind: $behind,
-       goneBranches: $gone, parked: ($parked == 1), pr: ($pr | pr), lastCommit: ($last | nz)}' > "$out"
+       goneBranches: $gone, parked: ($parked == 1), pr: ($pr | pr), lastCommit: ($last | nz),
+       lastActivity: ($at * 1000)}' > "$out"
   else { printf '%s%s %s %s %s %s\037  %s%s%s\t%s\n' \
       "$rname" "$(printf '%*s' $(( ${#rplain} < 11 + W_TITLE ? 11 + W_TITLE - ${#rplain} : 0 )) '')" \
       "$rmark" "$rtrack" "$rdead" "$rcistr" \
@@ -502,11 +516,11 @@ scan_repo() {
     ci=$(printf '%s' "$pl" | cut -f5); base=$(printf '%s' "$pl" | cut -f6)
     base=${base:+origin/$base}; base=${base:-$repobase}
 
-    local outside=0 sid="" stitle=""; action=""
+    local outside=0 sid="" sat=0 stitle=""; action=""
     case "$wt" in "$REPOS"/*) ;; *) outside=1 ;; esac
-    # sid and title are never empty, so read's collapsing of tabs only ever eats a missing action
+    # sid, time and title are never empty, so read's collapsing of tabs only ever eats a missing action
     [ -f "${SESSION_TSV:-}" ] \
-      && IFS=$'\t' read -r sid stitle action < <(awk -F'\t' -v p="$wt" '$1==p{print $2 "\t" $3 "\t" $4; exit}' "$SESSION_TSV")
+      && IFS=$'\t' read -r sid sat stitle action < <(awk -F'\t' -v p="$wt" '$1==p{print $2 "\t" $3 "\t" $4 "\t" $5; exit}' "$SESSION_TSV")
     # Titles lead with "repo number · " — the row already shows both.
     title=$stitle; case "$title" in *" · "*) title="${title#* · }";; esac
     # A session outlives the PR it was named for, so the PR's own title wins.
@@ -525,14 +539,16 @@ scan_repo() {
     fi
 
     if [ "$JSON" -eq 1 ]; then
-      local wparked=$rparked; is_parked "$wt" && wparked=1
+      local wparked=$rparked wat; is_parked "$wt" && wparked=1
+      wat=$(git -C "$wt" log -1 --format=%ct 2>/dev/null)
       jq -nc --arg path "$wt" --arg repo "$name" --arg repoPath "$dir" --arg branch "$br" --arg title "$title" \
         --arg base "$base" --arg pr "$pl" --arg sid "$sid" --arg stitle "$stitle" --arg action "$action" \
         --argjson dirty "$wdirty" --argjson commits "$commits" --argjson ins "$ins" --argjson del "$del" \
-        --argjson parked "$wparked" --argjson outside "$outside" "$JQ_PR"'
+        --argjson parked "$wparked" --argjson outside "$outside" --argjson at "${wat:-0}" --argjson sat "${sat:-0}" "$JQ_PR"'
         {kind: "worktree", path: $path, repo: $repo, repoPath: $repoPath, branch: $branch, title: $title,
          dirty: $dirty, base: ($base | nz), commits: $commits, insertions: $ins, deletions: $del,
          parked: ($parked == 1), outsideRepos: ($outside == 1), pr: ($pr | pr),
+         lastActivity: ([$at * 1000, $sat] | max),
          session: (if $sid == "" then null else {id: $sid, title: $stitle, needsAction: ($action | nz)} end)}' >> "$out"
       continue
     fi
@@ -595,7 +611,7 @@ build_sessions() {
   SESSION_TSV=$(mktemp)
   find "$SESSION_STORE" -name '*.json' -print0 2>/dev/null \
     | xargs -0 jq -r 'select(.isArchived != true) | select((.worktreePath // .cwd) != null)
-                      | [(.worktreePath // .cwd), .sessionId, (.title // "untitled"),
+                      | [(.worktreePath // .cwd), .sessionId, (.lastActivityAt // 0), (.title // "untitled"),
                          (.postTurnSummary.needs_action // "")] | @tsv' 2>/dev/null \
     > "$SESSION_TSV"
   export SESSION_TSV
@@ -1030,6 +1046,23 @@ build_rows() {   # the current tab: repos and worktrees, PRs, workspaces, or par
 }
 
 [ -n "${PREVIEW_TARGET:-}" ] && { preview_target "$PREVIEW_TARGET"; exit 0; }
+
+new_worktree() {   # new_worktree <repo> <branch> [base] -> the new worktree's path
+  local dir="$REPOS/$1" br=$2 base=${3:-} wt
+  [ -d "$dir/.git" ] || { echo "not a repo in $REPOS: $1" >&2; return 1; }
+  git check-ref-format --branch "$br" >/dev/null 2>&1 || { echo "not a valid branch name: $br" >&2; return 1; }
+  git -C "$dir" show-ref --verify --quiet "refs/heads/$br" && { echo "branch already exists: $br" >&2; return 1; }
+  git -C "$dir" fetch --quiet origin 2>/dev/null
+  if [ -n "$base" ]; then base=origin/$base; else base=$(preview_base "$dir"); fi
+  git -C "$dir" rev-parse --verify --quiet "$base" >/dev/null || { echo "no base branch ${base:-on origin} for $1" >&2; return 1; }
+  wt="$REPOS/$1-worktrees/$(printf '%s' "$br" | tr '/' '-')"
+  [ -e "$wt" ] && { echo "already exists: $wt" >&2; return 1; }
+  mkdir -p "${wt%/*}"
+  # --no-track: the branch is new work, not a copy of its base, so ↑↓ shouldn't count against staging
+  git -C "$dir" worktree add --quiet --no-track -b "$br" "$wt" "$base" >&2 || return 1
+  printf '%s\n' "$wt"
+}
+[ -n "${NEW_REPO:-}" ] && { new_worktree "$NEW_REPO" "$NEW_BRANCH" "$NEW_BASE"; exit $?; }
 
 row_cache() {   # the last rows drawn for this tab, keyed by everything that shapes them
   local view; view=$(cat "${RD_VIEW_FILE:-/dev/null}" 2>/dev/null)

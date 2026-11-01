@@ -61,6 +61,8 @@ usage: repo-dash.sh [<noun> <verb>] [args] [flags]
   session open [dir]          just the Claude session
   path copy [dir|url]         copy a folder, or a PR's local worktree, to the clipboard
   park list                   what's held out of the repos tab
+  place list                  every repo, worktree and workspace, with just enough to switch
+                              to it (branch, Claude session, last activity): fast, no PRs or diffs
   park add|remove [dir]       hold a repo or worktree out of the repos tab, or bring it back
 
   [dir] defaults to the checkout you're in. list verbs print a table at a terminal
@@ -94,7 +96,7 @@ case "${1:-}" in
   "")   NOUNVERB=1; set -- --pick --pr ;;
   dash) NOUNVERB=1; shift; set -- --pick --pr "$@" ;;
   help) usage; exit 0 ;;
-  repo|pr|workspace|worktree|session|path|park)
+  repo|pr|workspace|worktree|session|path|park|place)
     NOUNVERB=1; noun=$1; verb=${2:-}; shift; [ $# -gt 0 ] && shift
     case "$noun $verb" in
       "repo list")      LIST=repos; set -- --pr "$@" ;;
@@ -109,6 +111,7 @@ case "${1:-}" in
         [ -n "$NEW_REPO" ] && [ -n "$NEW_BRANCH" ] || { echo "usage: repo-dash.sh worktree new <repo> <branch> [--base <branch>]" >&2; exit 2; }
         set -- ;;
       "park list")      LIST=parked; set -- --pr "$@" ;;
+      "place list")     LIST=places ;;
       "park add")       set -- --park "$@" ;;
       "park remove")    set -- --unpark "$@" ;;
       "pr merge")
@@ -729,6 +732,44 @@ preview_pr() {   # line 1: the PR's base ref; the rest: a summary block. Cached 
     "  \u001b[2m\(.url)\u001b[0m"' "$cache" 2>/dev/null
 }
 
+place_repo() {   # place_repo <repo> -> per checkout: kind path repo branch at parked sid sat title action
+  local dir=$1 name=${1##*/} wt br kind at parked sid sat stitle action rparked=0
+  is_parked "$dir" && rparked=1
+  git -C "$dir" worktree list --porcelain 2>/dev/null | awk '
+    /^worktree / { w = substr($0, 10) }
+    /^branch /   { b = substr($0, 19) }
+    /^detached/  { b = "(detached)" }
+    /^$/         { if (w != "") print w "\t" b; w = ""; b = "" }
+    END          { if (w != "") print w "\t" b }' \
+  | while IFS=$'\t' read -r wt br; do
+      kind=worktree; [ "$wt" = "$dir" ] && kind=repo
+      at=$(git -C "$wt" log -1 --format=%ct 2>/dev/null)
+      parked=$rparked; is_parked "$wt" && parked=1
+      sid=""; sat=0; stitle=""; action=""
+      [ -f "${SESSION_TSV:-}" ] \
+        && IFS=$'\t' read -r sid sat stitle action < <(awk -F'\t' -v p="$wt" '$1==p{print $2 "\t" $3 "\t" $4 "\t" $5; exit}' "$SESSION_TSV")
+      printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+        "$kind" "$wt" "$name" "${br:-(detached)}" "${at:-0}" "$parked" "$sid" "${sat:-0}" "$stitle" "$action"
+    done
+}
+export -f place_repo
+
+list_places() {   # every repo, worktree and workspace: one git worktree list + one git log each, no status or PRs
+  local d
+  for d in "$REPOS"/*/; do d=${d%/}; [ -d "$d/.git" ] && printf '%s\0' "$d"; done \
+    | xargs -0 -P "$JOBS" -I{} bash -c 'place_repo "$1"' _ {} 2>/dev/null \
+    | jq -Rc 'split("\t") as $f
+        # session titles lead with "repo number · ", which the row already shows
+        | ($f[8] | sub("^.*? · "; "")) as $t
+        | {kind: $f[0], path: $f[1], repo: $f[2], branch: $f[3],
+           title: (if $f[0] == "repo" then $f[2] elif $t != "" then $t
+                   elif $f[3] == "(detached)" then ($f[1] | split("/") | last) else ($f[3] | sub("^[^/]*/"; "")) end),
+           parked: ($f[5] == "1"),
+           lastActivity: ([($f[4] | tonumber) * 1000, ($f[7] | tonumber)] | max),
+           session: (if $f[6] == "" then null else {id: $f[6], title: $f[8], needsAction: (if $f[9] == "" then null else $f[9] end)} end)}'
+  JSON=1 list_workspaces
+}
+
 list_workspaces() {   # the _*.code-workspace multi-root workspaces
   local ws slug name
   for ws in "$REPOS"/_*.code-workspace; do
@@ -872,6 +913,8 @@ render() {   # plain, non-interactive: the tab's rows with the path column strip
   case "${LIST:-repos}" in
     prs)        title="PULL REQUESTS"; build_pr_list; body=$(list_prs) ;;
     workspaces) title=WORKSPACES; body=$(list_workspaces) ;;
+    places)     title=PLACES
+                body=$(list_places | jq -r '"\(if .kind == "workspace" then "WS" elif .kind == "repo" then "▸ " else "  └" end) \(.title // .name)  \(.branch // "")\(if .session.needsAction then "  ⚑ " + .session.needsAction else "" end)"') ;;
     parked)     title=PARKED; VIEW=parked; export VIEW; body=$(RD_SUMMARY_FILE="$sf" scan_all)
                 [ -n "$body" ] || body="  ${DIM}nothing parked · repo-dash.sh park add [dir]${R}" ;;
     *)          body=$(RD_SUMMARY_FILE="$sf" scan_all) ;;
@@ -1016,11 +1059,12 @@ json_out() {   # one tab as a single JSON document, for anything that isn't fzf 
   command -v jq >/dev/null || { echo "--json needs jq" >&2; exit 1; }
   VIEW=$JSON_VIEW; export VIEW
   local rows; rows=$(mktemp)
-  build_sessions; build_prs
+  build_sessions
   case "$VIEW" in
+    places)     list_places > "$rows" ;;
     prs)        build_pr_list; json_prs > "$rows" ;;
     workspaces) list_workspaces > "$rows" ;;
-    *)          scan_all > "$rows" ;;
+    *)          build_prs; scan_all > "$rows" ;;
   esac
   # shellcheck disable=SC2086
   set -- ${RD_STATS:-}

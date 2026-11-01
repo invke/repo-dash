@@ -84,6 +84,7 @@ Outside the dashboard it's `rd <noun> <verb>`. `[dir]` defaults to the checkout 
 | `rd workspace open <file>` | a `.code-workspace` in VS Code |
 | `rd path copy [dir\|url]` | a folder, or a PR's local worktree, to the clipboard |
 | `rd park add\|remove [dir]` | hold it out of the repos tab, or bring it back |
+| `rd place list` | every repo, worktree and workspace with just branch, Claude session and last activity: under a second, for switchers |
 
 The old flags (`--pick`, `--pr`, `--park`, `--unpark`, `--json`) still work. The ones with a new form say so on stderr.
 

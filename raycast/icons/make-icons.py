@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
-"""Writes the Burrow icons as SVG (render.sh turns them into assets/*.png): a rat peeking out of its burrow, plus a badge per command."""
+"""Writes the Burrow icons as SVG (render.sh turns them into assets/*.png): a rat peeking out of its burrow.
+
+Each command's icon puts its glyph up front on its own colour, with a smaller rat peeking in below.
+"""
 from pathlib import Path
 
 OUT = Path(__file__).parent
 
-RAT = """
+DEFS = """
   <defs>
     <linearGradient id="soil" x1="0" y1="0" x2="0" y2="1">
       <stop offset="0" stop-color="#A9744A"/>
@@ -16,11 +19,17 @@ RAT = """
     </radialGradient>
     <clipPath id="above"><rect x="0" y="0" width="512" height="384"/></clipPath>
   </defs>
-  <rect x="32" y="32" width="448" height="448" rx="104" fill="url(#soil)"/>
+"""
+
+SOIL = """
+  <rect width="512" height="512" fill="url(#soil)"/>
   <g fill="#000" opacity="0.12">
-    <circle cx="96" cy="120" r="9"/><circle cx="420" cy="96" r="7"/><circle cx="118" cy="300" r="6"/>
-    <circle cx="430" cy="270" r="10"/><circle cx="80" cy="420" r="8"/><circle cx="300" cy="80" r="5"/>
+    <circle cx="80" cy="104" r="10"/><circle cx="440" cy="80" r="8"/><circle cx="104" cy="300" r="7"/>
+    <circle cx="452" cy="270" r="11"/><circle cx="64" cy="440" r="9"/><circle cx="300" cy="60" r="6"/>
   </g>
+"""
+
+RAT = """
   <path d="M128 396 C 80 392, 66 334, 102 304 S 138 244, 108 212" stroke="#E79AAC" stroke-width="13"
         stroke-linecap="round" fill="none"/>
   <ellipse cx="256" cy="384" rx="168" ry="56" fill="#24150B"/>
@@ -55,7 +64,7 @@ RAT = """
 def w(width: int = 12) -> str:
     return f'stroke="#FFF" stroke-width="{width}" stroke-linecap="round" stroke-linejoin="round" fill="none"'
 
-BADGES = {
+GLYPHS = {
     "switch-to": ("#3B82F6", f'<g {w()}><path d="M362 372 h64 l-18 -18"/><path d="M422 412 h-64 l18 18"/></g>'),
     "needs-me": ("#F97316", f'<g {w()}><path d="M370 436 v-88"/><path d="M370 352 h50 l-12 20 l12 20 h-50" fill="#FFF"/></g>'),
     "new-worktree": ("#22C55E", f'<g {w(14)}><path d="M392 360 v64"/><path d="M360 392 h64"/></g>'),
@@ -68,10 +77,28 @@ BADGES = {
 
 
 def svg(body: str) -> str:
-    return f'<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">{body}</svg>\n'
+    return f'<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">{DEFS}{body}</svg>\n'
 
 
-(OUT / "icon.svg").write_text(svg(RAT))
-for name, (color, glyph) in BADGES.items():
-    badge = f'<circle cx="392" cy="392" r="82" fill="#FFF"/><circle cx="392" cy="392" r="70" fill="{color}"/>{glyph}'
-    (OUT / f"{name}.svg").write_text(svg(RAT + badge))
+def shade(color: str, k: float) -> str:
+    r, g, b = (int(color[i : i + 2], 16) for i in (1, 3, 5))
+    return "#" + "".join(f"{max(0, min(255, round(c * k))):02X}" for c in (r, g, b))
+
+
+# the art was drawn inside a 448px tile; stretch it to the edges so Raycast doesn't shrink it
+BLEED = '<g transform="translate(256 256) scale(1.143) translate(-256 -256)">{}</g>'
+
+
+
+
+def focus(glyph: str, color: str) -> str:
+    bg = (f'<linearGradient id="bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="{shade(color, 1.15)}"/>'
+          f'<stop offset="1" stop-color="{shade(color, 0.7)}"/></linearGradient><rect width="512" height="512" fill="url(#bg)"/>')
+    big = f'<g transform="translate(256 172) scale(2.0) translate(-392 -392)">{glyph}</g>'
+    peek = f'<g transform="translate(256 470) scale(0.66) translate(-256 -384)">{RAT}</g>'
+    return svg(bg + big + peek)
+
+
+(OUT / "icon.svg").write_text(svg(SOIL + BLEED.format(RAT)))
+for name, (color, glyph) in GLYPHS.items():
+    (OUT / f"{name}.svg").write_text(focus(glyph, color))

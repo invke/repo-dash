@@ -7,7 +7,7 @@ for svg in "$here"/*.svg; do
   name=$(basename "$svg" .svg)
   qlmanage -t -s 512 -o "$tmp" "$svg" >/dev/null 2>&1
   magick "$tmp/$name.svg.png" -alpha set \
-    \( -size 512x512 xc:none -fill white -draw "roundrectangle 32,32 479,479 104,104" \) \
+    \( -size 512x512 xc:none -fill white -draw "roundrectangle 0,0 511,511 96,96" \) \
     -compose DstIn -composite "$assets/$name.png"
 done
 rm -r "$tmp"

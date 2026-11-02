@@ -39,6 +39,13 @@ park() {   # park <on|off|toggle> <path>; drops paths that no longer exist while
   mv "$tmp" "$PARKED_FILE"
 }
 
+# GUI launchers like Raycast don't get the PATH entry VS Code adds to your shell
+if ! command -v code >/dev/null; then
+  for app in "/Applications/Visual Studio Code.app" "$HOME/Applications/Visual Studio Code.app"; do
+    [ -x "$app/Contents/Resources/app/bin/code" ] && { PATH="$PATH:$app/Contents/Resources/app/bin"; break; }
+  done
+fi
+
 ALL=0; DEAD=0; WATCH=0; INTERVAL=30; ACTIVE=0; PR=0; PICK=0; ROWS=0; JSON=0; JSON_VIEW=repos; LAYOUT=auto
 SUMMARY=""; LIST=""; NOUNVERB=""
 
@@ -219,7 +226,7 @@ while (( $# )); do
                 case "${1:-}" in
                   http*) open "$1" ;;
                   ?*)
-                    [ "$mode" = --open ] && code -r "$1"
+                    if [ "$mode" = --open ]; then code -r "$1" || exit 1; fi
                     store="$HOME/Library/Application Support/Claude/claude-code-sessions"
                     sid=$(find "$store" -name '*.json' -print0 2>/dev/null \
                       | xargs -0 jq -r --arg p "$1" 'select(.isArchived != true) | select((.worktreePath // .cwd) == $p)

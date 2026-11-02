@@ -41,7 +41,7 @@ export type WorktreeRow = {
 
 export type WorkspaceRow = { kind: "workspace"; name: string; path: string };
 
-// place list: just enough to switch to a checkout, without status, diffs or PRs
+// place list: just enough to switch to a checkout, without status or diffs; pr only from a fresh cache
 export type PlaceRow = {
   kind: "repo" | "worktree";
   path: string;
@@ -50,6 +50,7 @@ export type PlaceRow = {
   title: string;
   parked: boolean;
   lastActivity: number;
+  pr: Pr | null;
   session: Session | null;
 };
 

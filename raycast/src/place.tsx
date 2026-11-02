@@ -1,9 +1,10 @@
 import { Action, ActionPanel, Color, Icon, List, showToast, Toast } from "@raycast/api";
+import { ReactNode } from "react";
 import { ciAccessory, openSession, Pr, rd, RepoRow, Session, WorkspaceRow, WorktreeRow } from "./rd";
 
 export type Place = RepoRow | WorktreeRow | WorkspaceRow;
 
-function prAccessory(pr: Pr | null): List.Item.Accessory | null {
+export function prAccessory(pr: Pr | null): List.Item.Accessory | null {
   if (!pr) return null;
   const color = pr.state === "draft" ? Color.SecondaryText : pr.state === "APPROVED" ? Color.Green : Color.Yellow;
   return { tag: { value: `#${pr.number}`, color }, tooltip: pr.state ?? "review needed" };
@@ -56,7 +57,17 @@ export function openPlace(row: Actionable): Promise<string> {
   return rd(row.kind === "workspace" ? ["workspace", "open", row.path] : ["worktree", "open", row.path]);
 }
 
-export function PlaceActions({ row, refresh, onOpen }: { row: Actionable; refresh: () => void; onOpen?: () => void }) {
+export function PlaceActions({
+  row,
+  refresh,
+  onOpen,
+  children,
+}: {
+  row: Actionable;
+  refresh: () => void;
+  onOpen?: () => void;
+  children?: ReactNode;
+}) {
   const session = row.session ?? null;
   const git = row.kind !== "workspace" ? row : null;
   return (
@@ -117,6 +128,7 @@ export function PlaceActions({ row, refresh, onOpen }: { row: Actionable; refres
           shortcut={{ modifiers: ["cmd"], key: "r" }}
           onAction={refresh}
         />
+        {children}
       </ActionPanel.Section>
     </ActionPanel>
   );

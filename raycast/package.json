@@ -1,8 +1,8 @@
 {
   "$schema": "https://www.raycast.com/schemas/extension.json",
   "name": "repo-dash",
-  "title": "Repo Dash",
-  "description": "Your repos, worktrees, PRs and parked Claude sessions, from repo-dash.sh.",
+  "title": "Burrow",
+  "description": "Burrow between your worktrees, repos and workspaces, with their PRs and Claude sessions, from repo-dash.sh.",
   "icon": "icon.png",
   "author": "user_2c1f0bd33cf3f55747b2",
   "categories": [
@@ -34,43 +34,49 @@
       "title": "Switch to",
       "subtitle": "Repo Dash",
       "description": "Jump to any worktree, repo or workspace, most used first",
-      "mode": "view"
+      "mode": "view",
+      "icon": "switch-to.png"
     },
     {
       "name": "needs-me",
       "title": "Needs Me",
       "subtitle": "Repo Dash",
       "description": "Claude sessions waiting on you, reviews, and PRs that need work or are ready to merge",
-      "mode": "view"
+      "mode": "view",
+      "icon": "needs-me.png"
     },
     {
       "name": "new-worktree",
       "title": "New Worktree",
       "subtitle": "Repo Dash",
       "description": "Cut a new branch into its own worktree and open it",
-      "mode": "view"
+      "mode": "view",
+      "icon": "new-worktree.png"
     },
     {
       "name": "repos",
       "title": "Repos",
       "subtitle": "Repo Dash",
       "description": "Repos and worktrees with their PRs and Claude sessions",
-      "mode": "view"
+      "mode": "view",
+      "icon": "repos.png"
     },
     {
       "name": "prs",
       "title": "Pull Requests",
       "subtitle": "Repo Dash",
       "description": "Your open PRs, grouped by what's left before merge",
-      "mode": "view"
+      "mode": "view",
+      "icon": "prs.png"
     },
     {
       "name": "menu-bar",
-      "title": "Repo Dash Menu Bar",
+      "title": "Burrow Menu Bar",
       "subtitle": "Repo Dash",
       "description": "Claude sessions that need you and PRs ready to merge",
       "mode": "menu-bar",
-      "interval": "5m"
+      "interval": "5m",
+      "icon": "menu-bar.png"
     }
   ],
   "dependencies": {

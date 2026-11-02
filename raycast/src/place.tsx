@@ -53,8 +53,12 @@ export async function runToast(args: string[], title: string, done?: () => void)
 // what the actions need: a full row, or a light one from place list
 type Actionable = { kind: string; path: string; parked?: boolean; pr?: Pr | null; session?: Session | null };
 
-export function openPlace(row: Actionable): Promise<string> {
-  return rd(row.kind === "workspace" ? ["workspace", "open", row.path] : ["worktree", "open", row.path]);
+export async function openPlace(row: Actionable): Promise<void> {
+  try {
+    await rd(row.kind === "workspace" ? ["workspace", "open", row.path] : ["worktree", "open", row.path]);
+  } catch (error) {
+    await showToast({ style: Toast.Style.Failure, title: "Couldn't open", message: String(error) });
+  }
 }
 
 export function PlaceActions({
